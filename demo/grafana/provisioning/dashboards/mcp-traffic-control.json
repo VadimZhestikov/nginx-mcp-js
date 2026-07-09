@@ -34,6 +34,89 @@
       "fieldConfig": {
         "defaults": {
           "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 70,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "active",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "alignValue": "center",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "mergeValues": true,
+        "rowHeight": 0.85,
+        "showValue": "never",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "mcp_policy_info == 1",
+          "legendFormat": "{{policy}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Policy timeline",
+      "type": "state-timeline"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
             "mode": "thresholds"
           },
           "mappings": [],
@@ -52,10 +135,10 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 0,
+        "x": 8,
         "y": 0
       },
-      "id": 1,
+      "id": 2,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -134,11 +217,11 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 20,
-        "x": 4,
+        "w": 12,
+        "x": 12,
         "y": 0
       },
-      "id": 2,
+      "id": 3,
       "options": {
         "colorMode": "none",
         "graphMode": "none",
@@ -175,105 +258,6 @@
       ],
       "title": "What you are seeing",
       "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "fillOpacity": 70,
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineWidth": 0,
-            "spanNulls": false
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "open",
-                  "color": "green",
-                  "index": 0
-                },
-                "1": {
-                  "text": "protect-upstreams",
-                  "color": "blue",
-                  "index": 1
-                },
-                "2": {
-                  "text": "fair-clients",
-                  "color": "orange",
-                  "index": 2
-                },
-                "3": {
-                  "text": "full-control",
-                  "color": "purple",
-                  "index": 3
-                }
-              }
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 24,
-        "x": 0,
-        "y": 5
-      },
-      "id": 3,
-      "options": {
-        "alignValue": "center",
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "mergeValues": true,
-        "rowHeight": 0.9,
-        "showValue": "auto",
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "mcp_policy_id",
-          "legendFormat": "policy",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Policy timeline",
-      "type": "state-timeline"
     },
     {
       "datasource": {
@@ -362,7 +346,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 10
+        "y": 5
       },
       "id": 4,
       "options": {
@@ -465,7 +449,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 10
+        "y": 5
       },
       "id": 5,
       "options": {
@@ -557,7 +541,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 10
+        "y": 5
       },
       "id": 6,
       "options": {
@@ -676,7 +660,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 18
+        "y": 13
       },
       "id": 7,
       "options": {
@@ -807,7 +791,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 18
+        "y": 13
       },
       "id": 8,
       "options": {
@@ -910,7 +894,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 18
+        "y": 13
       },
       "id": 9,
       "options": {
@@ -947,7 +931,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 21
       },
       "id": 10,
       "options": {
@@ -980,6 +964,6 @@
   "timezone": "browser",
   "title": "MCP traffic control",
   "uid": "mcp-traffic-control",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
