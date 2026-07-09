@@ -160,8 +160,13 @@ function mcp_tool_status(r) {
     return 'ok';
 }
 
+function mcp_message_parsed() {
+    return _mcp_messages.length > 0;
+}
+
 export default {
     mcp_response_filter, mcp_header_filter,
     mcp_tool_name, mcp_tool_status,
-    mcp_client_name, mcp_server_name
+    mcp_client_name, mcp_server_name,
+    mcp_message_parsed
 };

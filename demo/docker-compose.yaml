@@ -7,9 +7,11 @@ services:
     image: nginx:alpine-otel
     ports:
       - "9000:9000"
+      - "9100:9100"
     volumes:
       - ./nginx/mcp.conf:/etc/nginx/nginx.conf:ro
       - ../mcp.js:/etc/nginx/mcp.js:ro
+      - ./nginx/mcp_control.js:/etc/nginx/mcp_control.js:ro
     depends_on:
       - mcp-stable
       - mcp-flaky

@@ -116,13 +116,67 @@ docker compose down
    the base `--max-latency`).  Errors are concentrated on the flaky server
    (~10% tool error rate).
 
+## Traffic control demo
+
+Beyond passive observability, the demo includes a dynamic traffic-control
+plane (`nginx/mcp_control.js`) that recomputes rate limits every second from
+the traffic it observes and enforces them in NGINX — no changes to MCP
+clients or servers:
+
+- **Client loop** — each client identity's offered RPS is measured
+  (EWMA); under a `fair` policy every client is capped at 1.25x the
+  average active-client RPS, so heavy hitters get `429` while light
+  clients are never touched.
+- **Upstream loop** — each upstream's tool error ratio is tracked from
+  the parsed JSON-RPC responses; under an `aimd` policy an unhealthy
+  upstream's allowed RPS is halved every 2s (down to a floor) and
+  recovers additively (+2 rps/s) once healthy.
+- **Routing** — new sessions destined for an upstream whose error ratio
+  exceeds 5% are transparently rerouted to the healthiest upstream
+  (`Mcp-Session-Id` affinity keeps existing sessions pinned). With no
+  traffic the error estimate decays, letting probe sessions return
+  (half-open circuit breaker).
+
+### Policies
+
+Four named policies exercise the loops; by default they **auto-rotate
+every 75 seconds** so the dashboard continuously demonstrates rules
+changing and their effect:
+
+| Policy | Client limits | Upstream limits | Rerouting |
+|--------|---------------|-----------------|-----------|
+| `open` | – | – | – |
+| `protect-upstreams` | – | AIMD from error rate | – |
+| `fair-clients` | fair share | – | – |
+| `full-control` | fair share | AIMD | yes |
+
+### Control API (port 9100)
+
+```bash
+curl http://localhost:9100/policy                          # current state snapshot
+curl -X POST 'http://localhost:9100/policy?policy=full-control&auto=off'  # pin a policy
+curl -X POST 'http://localhost:9100/policy?auto=on&interval=45'           # rotate every 45s
+curl http://localhost:9100/metrics                         # Prometheus exposition
+```
+
+Prometheus scrapes `:9100/metrics` every 5s, so policy flips, limit
+changes, `429` counts, and reroutes appear in Grafana within one scrape
+interval. Open the **MCP traffic control** dashboard: it shows the
+active policy timeline, per-client offered RPS vs. dynamic caps,
+per-upstream RPS vs. AIMD limits, error-ratio EWMA against the 5%
+threshold, rejects by reason, and session reroutes. The original **MCP
+overview** dashboard shows the effect on real traffic (e.g.
+client-green shifting from mcp-flaky to mcp-stable under
+`full-control`).
+
 ## File layout
 
 ```
 demo/
 ├── docker-compose.yaml                 # Multi-container orchestration
 ├── nginx/
-│   └── mcp.conf                        # NGINX config (proxy + otel + njs)
+│   ├── mcp.conf                        # NGINX config (proxy + otel + njs)
+│   └── mcp_control.js                  # Dynamic rate limiting + routing (njs)
 ├── mcp/
 │   ├── Dockerfile                      # Builds Go binaries
 │   ├── mcp_server.go                   # Mock MCP server (8 tools, 3 instances)
@@ -139,7 +193,8 @@ demo/
         │   └── prometheus.yaml         # Auto-provisioned datasource
         └── dashboards/
             ├── dashboards.yaml         # Dashboard provisioning config
-            └── mcp-overview.json       # Pre-built dashboard (9 panels)
+            ├── mcp-overview.json       # Pre-built dashboard (9 panels)
+            └── mcp-traffic-control.json # Policy/limits/reroutes dashboard
 ```
 
 The njs module itself (`mcp.js`) lives at the repository root.

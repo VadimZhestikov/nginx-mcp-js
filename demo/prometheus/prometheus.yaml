@@ -3,3 +3,9 @@ scrape_configs:
     scrape_interval: 5s
     static_configs:
       - targets: ['otel-collector:9464']
+
+  # njs traffic-control state: active policy, dynamic limits, decisions
+  - job_name: 'mcp-control'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['nginx:9100']

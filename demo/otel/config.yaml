@@ -8,12 +8,14 @@ receivers:
 
 connectors:
   spanmetrics:
-    metrics_flush_interval: 15s
+    metrics_flush_interval: 5s
     dimensions:
       - name: mcp.tool.name
       - name: mcp.tool.status
       - name: mcp.client.name
       - name: mcp.server.name
+      - name: mcp.upstream.selected
+      - name: mcp.ratelimit.decision
     histogram:
       unit: ms
       explicit:
