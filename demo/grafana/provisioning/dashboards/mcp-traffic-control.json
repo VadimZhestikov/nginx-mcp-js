@@ -199,12 +199,29 @@
           },
           "mappings": [
             {
+              "type": "value",
               "options": {
+                "0": {
+                  "text": "open",
+                  "color": "green",
+                  "index": 0
+                },
                 "1": {
-                  "text": "active"
+                  "text": "protect-upstreams",
+                  "color": "blue",
+                  "index": 1
+                },
+                "2": {
+                  "text": "fair-clients",
+                  "color": "orange",
+                  "index": 2
+                },
+                "3": {
+                  "text": "full-control",
+                  "color": "purple",
+                  "index": 3
                 }
-              },
-              "type": "value"
+              }
             }
           ],
           "thresholds": {
@@ -234,8 +251,8 @@
           "showLegend": true
         },
         "mergeValues": true,
-        "rowHeight": 0.85,
-        "showValue": "never",
+        "rowHeight": 0.9,
+        "showValue": "auto",
         "tooltip": {
           "hideZeros": false,
           "mode": "single",
@@ -249,8 +266,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "mcp_policy_info == 1",
-          "legendFormat": "{{policy}}",
+          "expr": "mcp_policy_id",
+          "legendFormat": "policy",
           "range": true,
           "refId": "A"
         }
@@ -963,6 +980,6 @@
   "timezone": "browser",
   "title": "MCP traffic control",
   "uid": "mcp-traffic-control",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
