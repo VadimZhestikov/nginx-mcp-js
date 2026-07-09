@@ -40,7 +40,7 @@ Both Go programs use the official
 | Server | Port | Behavior |
 |--------|------|----------|
 | mcp-stable | 9001 | No errors, base latency (`--max-latency 50ms`) |
-| mcp-flaky | 9002 | ~2% protocol errors, ~10% tool errors, base latency |
+| mcp-flaky | 9002 | ~2% protocol errors, ~25% tool errors, base latency |
 | mcp-sluggish | 9003 | No errors, elevated latency (`--max-latency 100ms`) |
 
 `query_db` and `resize_image` use 5x and 3x the base `--max-latency`
@@ -114,7 +114,7 @@ docker compose down
 
    `query_db` and `resize_image` have intentionally higher latency (5x and 3x
    the base `--max-latency`).  Errors are concentrated on the flaky server
-   (~10% tool error rate).
+   (~25% tool error rate).
 
 ## Traffic control demo
 
@@ -123,24 +123,33 @@ plane (`nginx/mcp_control.js`) that recomputes rate limits every second from
 the traffic it observes and enforces them in NGINX — no changes to MCP
 clients or servers:
 
-- **Client loop** — each client identity's offered RPS is measured
-  (EWMA); under a `fair` policy every client is capped at 1.25x the
-  average active-client RPS, so heavy hitters get `429` while light
-  clients are never touched.
+Only `tools/call` requests are measured and limited, so limits read as
+**tool calls per second** and session setup is never rejected — the
+proxy throttles tool invocations, not the MCP protocol:
+
+- **Client loop** — each client identity's offered tool-call rate is
+  measured (EWMA); under a `fair` policy every client is capped at
+  1.25x the average active-client rate, so heavy hitters get `429`
+  while light clients are never touched.
 - **Upstream loop** — each upstream's tool error ratio is tracked from
   the parsed JSON-RPC responses; under an `aimd` policy an unhealthy
-  upstream's allowed RPS is halved every 2s (down to a floor) and
-  recovers additively (+2 rps/s) once healthy.
+  upstream's allowed rate is halved every 3s (down to a floor) and
+  recovers additively (+5 rps/s) once healthy — TCP-style congestion
+  control for tool calls.
 - **Routing** — new sessions destined for an upstream whose error ratio
   exceeds 5% are transparently rerouted to the healthiest upstream
   (`Mcp-Session-Id` affinity keeps existing sessions pinned). With no
   traffic the error estimate decays, letting probe sessions return
   (half-open circuit breaker).
 
+The mock client backs off 300ms on failed calls (including `429`s), as
+a well-behaved MCP client would — without backoff, rejected calls
+return in sub-millisecond and a client can spin at reject speed.
+
 ### Policies
 
 Four named policies exercise the loops; by default they **auto-rotate
-every 75 seconds** so the dashboard continuously demonstrates rules
+every 120 seconds** so the dashboard continuously demonstrates rules
 changing and their effect:
 
 | Policy | Client limits | Upstream limits | Rerouting |
@@ -161,9 +170,27 @@ curl http://localhost:9100/metrics                         # Prometheus expositi
 
 Prometheus scrapes `:9100/metrics` every 5s, so policy flips, limit
 changes, `429` counts, and reroutes appear in Grafana within one scrape
-interval. Open the **MCP traffic control** dashboard: it shows the
-active policy timeline, per-client offered RPS vs. dynamic caps,
-per-upstream RPS vs. AIMD limits, error-ratio EWMA against the 5%
+interval.
+
+### Built-in narration for demonstrations
+
+The demo explains itself while it runs:
+
+- **Policy-transition annotations** — at every policy switch (automatic
+  or via the API) the controller posts a Grafana annotation, so **both
+  dashboards** show a purple vertical marker at the exact transition
+  moment; hovering it shows what changed and what to watch for.
+- **"What you are seeing" panel** — the traffic-control dashboard has a
+  live text panel that always describes the active policy's visible
+  effects, plus a **Demo guide** panel with a phase-by-phase presenter
+  script (what to say, what to point at).
+- **Demonstrator notes on MCP overview** — the observability dashboard
+  has a companion notes panel describing how each policy phase
+  manifests in the passive per-tool/client/server panels.
+
+Open the **MCP traffic control** dashboard for the control plane: the
+active policy timeline, per-client offered tool rate vs. dynamic caps,
+per-upstream rate vs. AIMD limits, error-ratio EWMA against the 5%
 threshold, rejects by reason, and session reroutes. The original **MCP
 overview** dashboard shows the effect on real traffic (e.g.
 client-green shifting from mcp-flaky to mcp-stable under
@@ -208,7 +235,7 @@ The Docker Compose setup runs 8 separate containers:
 3. **prometheus** - Metrics storage and querying
 4. **grafana** - Dashboard visualization
 5. **mcp-stable** - MCP server with no errors
-6. **mcp-flaky** - MCP server with ~10% error rate
+6. **mcp-flaky** - MCP server with ~25% tool error rate
 7. **mcp-sluggish** - MCP server with elevated latency
 8. **mcp-client** - Traffic generator
 

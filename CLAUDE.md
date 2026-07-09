@@ -47,6 +47,14 @@ Docker Compose demo: three instances of a mock Go MCP server (`demo/mcp/mcp_serv
 
 A second njs module that imports `mcp.js` and wraps its filters (`js_body_filter`/`js_header_filter` allow only one handler per location, hence wrapping, and `mcp.js` exports `mcp_message_parsed` as the hook). It implements two per-second control loops driven by a `js_periodic` tick: fair-share per-client rate caps from observed RPS, and AIMD per-upstream limits from tool error-rate EWMAs, plus error-based rerouting of new sessions (session affinity via the `mcp_routes` dict; MCP sessions are server-bound so only `initialize` requests may be steered). Requests enter through a `js_content` gate (`mcp_gate`) that enforces both limits and `internalRedirect`s to internal `/route/<upstream>` locations. State lives in four shared dict zones: `mcp_stats`/`mcp_gauges` (type=number: counters/controller outputs) and `mcp_policy`/`mcp_routes` (strings). Port 9100 serves `/policy` (GET state, POST `?policy=|auto=|interval=` to change; policies auto-rotate by default) and `/metrics` (Prometheus text format, scraped every 5s). Windows in `mcp_stats` are reset via negative `incr`, never `set`, to avoid clobbering concurrent increments.
 
+Non-obvious constraints learned the hard way:
+
+- Only `tools/call` requests are counted/limited — limits read as tool calls/s and session setup is never 429'd. The mock client backs off 300ms on failures; without that, rejected calls return sub-millisecond and clients spin at reject speed, exploding the offered-rate gauges.
+- Policy transitions post Grafana annotations (tag `mcp-policy`) via `ngx.fetch` — this needs the `resolver 127.0.0.11` directive in nginx.conf, and posts are queued in the `mcp_policy` dict and flushed by the tick so they survive Grafana being briefly unreachable at startup. Both dashboards carry a tag-based annotation query.
+- The first controller tick after startup discards the accumulated windows instead of inferring rates from them.
+- Recreating the mock-server containers changes their IPs and nginx resolves `proxy_pass` hostnames only at startup — restart nginx after `docker compose up --build` recreates upstream containers, or connections 502. Note `docker compose up -d --build <one-service>` recreates every service sharing that build context.
+- Shared-dict state (policy, limits, stats) is in-memory only; an nginx restart resets to defaults (policy `open`, auto-rotation on).
+
 ## Contributing conventions
 
 - F5 CLA required before PRs can merge (a bot prompts on the PR).

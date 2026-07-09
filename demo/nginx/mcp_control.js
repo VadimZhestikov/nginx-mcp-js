@@ -20,36 +20,58 @@ var UPSTREAMS = ['mcp-stable', 'mcp-flaky', 'mcp-sluggish'];
 var POLICIES = {
     'open': {
         client: 'none', upstream: 'none', reroute: false,
-        desc: 'no limits, no rerouting (baseline)'
+        desc: 'no limits, no rerouting (baseline)',
+        explain: 'Baseline: no control. Limit lines disappear, 429s stop. '
+            + 'Natural traffic flows; client-green keeps hitting errors '
+            + 'on mcp-flaky.'
     },
     'protect-upstreams': {
         client: 'none', upstream: 'aimd', reroute: false,
-        desc: 'AIMD per-upstream limit driven by tool error rate'
+        desc: 'AIMD per-upstream limit driven by tool error rate',
+        explain: 'Upstream protection: AIMD limits appear. mcp-flaky\'s '
+            + 'error ratio is above 5%, so its allowed tool-call rate is '
+            + 'halved in steps; healthy upstreams stay at the ceiling. '
+            + 'Watch upstream_limit 429s squeeze mcp-flaky.'
     },
     'fair-clients': {
         client: 'fair', upstream: 'none', reroute: false,
-        desc: 'per-client cap at FAIR_FACTOR x average client RPS'
+        desc: 'per-client cap at FAIR_FACTOR x average client tool-call rate',
+        explain: 'Client fairness: every client gets the same cap, 1.25x '
+            + 'the average tool-call rate. Watch client-purple (the '
+            + 'heaviest tool caller) get clipped with client_limit 429s '
+            + 'while light clients are untouched.'
     },
     'full-control': {
         client: 'fair', upstream: 'aimd', reroute: true,
-        desc: 'both loops + new sessions rerouted away from unhealthy upstreams'
+        desc: 'both loops + new sessions rerouted away from unhealthy upstreams',
+        explain: 'Full control: both loops plus routing. New sessions avoid '
+            + 'unhealthy mcp-flaky; reroutes fire and client-green\'s '
+            + 'traffic shifts to mcp-stable (see the MCP overview '
+            + 'per-server panels), letting mcp-flaky recover.'
     }
 };
 
 var ROTATION = ['open', 'protect-upstreams', 'fair-clients', 'full-control'];
 
-// Controller tunables
+// Controller tunables.  Rates and windows count tools/call requests only, so
+// limits read as "tool calls per second" and session setup is never rejected.
 var ERR_THRESHOLD = 0.05;      // error ratio above which an upstream is unhealthy
-var AIMD_MIN = 4;              // rps floor for clamped upstreams
-var AIMD_MAX = 200;            // rps ceiling
-var AIMD_INCREASE = 2;         // additive increase per tick when healthy
+var AIMD_MIN = 4;              // tool-rps floor for clamped upstreams
+var AIMD_MAX = 200;            // tool-rps ceiling
+var AIMD_INCREASE = 5;         // additive increase per tick when healthy
 var AIMD_DECREASE = 0.5;       // multiplicative decrease when unhealthy
-var AIMD_HOLD_MS = 2000;       // min time between consecutive decreases
+var AIMD_HOLD_MS = 3000;       // min time between consecutive decreases
 var FAIR_FACTOR = 1.25;        // client cap = FAIR_FACTOR * avg active-client rps
-var FAIR_MIN = 2;              // rps floor for client caps
-var EWMA_ALPHA = 0.3;          // smoothing for rps and error-ratio estimates
+var FAIR_MIN = 2;              // tool-rps floor for client caps
+var FAIR_MAX = 60;             // sanity ceiling for client caps
+var EWMA_ALPHA = 0.3;          // smoothing for rps estimates
+var ERR_ALPHA = 0.1;           // slower smoothing for noisy error ratios
 var ERR_DECAY = 0.98;          // error-ratio decay per tick with no traffic (half-open)
-var DEFAULT_ROTATE_SECS = 75;  // policy auto-rotation period
+var DEFAULT_ROTATE_SECS = 120; // policy auto-rotation period
+
+// Grafana annotation target for policy-transition markers
+var GRAFANA_URL = 'http://grafana:3000';
+var GRAFANA_AUTH = 'Basic YWRtaW46YWRtaW4=';  // admin:admin (demo credentials)
 
 function policy_state() {
     var p = ngx.shared.mcp_policy;
@@ -148,9 +170,13 @@ function mcp_gate(r) {
         }
     }
 
+    // Only tools/call requests are measured and limited: limits then read as
+    // "tool calls per second" and session setup is never rejected.
+    var isTool = body.method === 'tools/call';
+
     // Client loop: the window counts offered load (including rejects), so the
     // controller sees each client's demand, not just what got through.
-    if (client) {
+    if (isTool && client) {
         var cw = stats.incr('w:c:' + client, 1);
         if (st.cfg.client !== 'none') {
             var cl = gauges.get('lim:c:' + client);
@@ -162,16 +188,20 @@ function mcp_gate(r) {
     }
 
     // Upstream loop: counted only for requests that passed the client gate.
-    var uw = stats.incr('w:u:' + target, 1);
-    if (st.cfg.upstream !== 'none') {
-        var ul = gauges.get('lim:u:' + target);
-        if (ul !== undefined && uw > ul) {
-            reject(r, 'upstream_limit', body.id);
-            return;
+    if (isTool) {
+        var uw = stats.incr('w:u:' + target, 1);
+        if (st.cfg.upstream !== 'none') {
+            var ul = gauges.get('lim:u:' + target);
+            if (ul !== undefined && uw > ul) {
+                reject(r, 'upstream_limit', body.id);
+                return;
+            }
         }
     }
 
-    stats.incr('d:' + decision, 1);
+    if (isTool || decision === 'rerouted') {
+        stats.incr('d:' + decision, 1);
+    }
     r.variables.mcp_rl_decision = decision;
     r.variables.mcp_upstream = target;
     r.internalRedirect('/route/' + target);
@@ -209,6 +239,47 @@ function response_filter(r, data, flags) {
     }
 }
 
+// Queues a policy-transition marker for Grafana's annotation store; both
+// dashboards query the mcp-policy tag, so a vertical line with the
+// explanation text appears on every panel at the moment of the switch.
+// The marker is queued (not sent inline) and flushed by the periodic tick
+// so it survives Grafana being briefly unreachable, e.g. during startup;
+// the payload carries its own timestamp, so late delivery still lands the
+// marker at the actual transition moment.
+function post_annotation(from, to) {
+    var text = '▶ ' + to + ' — ' + POLICIES[to].explain
+               + (from ? ' (was: ' + from + ')' : '');
+    ngx.shared.mcp_policy.set('ann', JSON.stringify({
+        time: Date.now(),
+        tags: ['mcp-policy', to],
+        text: text
+    }));
+}
+
+function flush_annotation() {
+    var p = ngx.shared.mcp_policy;
+    var pending = p.get('ann');
+    if (!pending) {
+        return;
+    }
+    ngx.fetch(GRAFANA_URL + '/api/annotations', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': GRAFANA_AUTH
+        },
+        body: pending
+    }).then(function (res) {
+        if (res.status < 300) {
+            p.delete('ann');
+        } else {
+            ngx.log(ngx.WARN, 'policy annotation failed: HTTP ' + res.status);
+        }
+    }).catch(function (e) {
+        ngx.log(ngx.WARN, 'policy annotation failed: ' + e.message);
+    });
+}
+
 // js_periodic controller: converts window counters into EWMA rates, error
 // ratios into AIMD upstream limits, client demand into fair-share caps, and
 // rotates the active policy when auto mode is on.
@@ -218,18 +289,33 @@ function tick() {
     var p = ngx.shared.mcp_policy;
     var now = Date.now();
 
+    flush_annotation();
+
     var st = policy_state();
     if (st.auto && st.since && now - st.since >= st.interval * 1000) {
         var idx = (parseInt(p.get('idx') || '0') + 1) % ROTATION.length;
+        var prev = st.name;
         p.set('idx', String(idx));
         p.set('policy', ROTATION[idx]);
         p.set('since', String(now));
         st = policy_state();
+        post_annotation(prev, st.name);
     }
 
     var last = parseInt(p.get('tick_ts') || '0');
     p.set('tick_ts', String(now));
-    var dt = last ? (now - last) / 1000 : 1;
+    if (!last) {
+        // First tick after startup: the windows have been accumulating for
+        // an unknown time, so discard them instead of inferring bogus rates.
+        stats.keys(1024).forEach(function (k) {
+            if (k.startsWith('w:')) {
+                stats.incr(k, -(stats.get(k) || 0));
+            }
+        });
+        post_annotation(null, st.name);
+        return;
+    }
+    var dt = (now - last) / 1000;
     if (dt < 0.2) {
         dt = 0.2;
     } else if (dt > 5) {
@@ -262,9 +348,11 @@ function tick() {
         var sum = 0;
         active.forEach(function (c) { sum += rates[c]; });
         var cap = active.length
-                  ? Math.max(FAIR_MIN,
-                             Math.round(FAIR_FACTOR * sum / active.length))
-                  : AIMD_MAX;
+                  ? Math.min(FAIR_MAX,
+                             Math.max(FAIR_MIN,
+                                      Math.round(FAIR_FACTOR * sum
+                                                 / active.length)))
+                  : FAIR_MAX;
         clients.forEach(function (c) {
             gauges.set('lim:c:' + c, cap);
         });
@@ -294,7 +382,7 @@ function tick() {
 
         var errPrev = gauges.get('err:u:' + u) || 0;
         var errNow = (dq > 0)
-                     ? EWMA_ALPHA * (de / dq) + (1 - EWMA_ALPHA) * errPrev
+                     ? ERR_ALPHA * (de / dq) + (1 - ERR_ALPHA) * errPrev
                      : errPrev * ERR_DECAY;  // no traffic: decay toward probing
         gauges.set('err:u:' + u, errNow);
 
@@ -329,6 +417,7 @@ function metrics(r) {
     var fam = {
         mcp_policy_info: { type: 'gauge', lines: [] },
         mcp_policy_auto: { type: 'gauge', lines: [] },
+        mcp_policy_id: { type: 'gauge', lines: [] },
         mcp_client_rps: { type: 'gauge', lines: [] },
         mcp_client_limit: { type: 'gauge', lines: [] },
         mcp_upstream_rps: { type: 'gauge', lines: [] },
@@ -346,6 +435,8 @@ function metrics(r) {
             + (name === st.name ? 1 : 0));
     });
     fam.mcp_policy_auto.lines.push('mcp_policy_auto ' + (st.auto ? 1 : 0));
+    fam.mcp_policy_id.lines.push(
+        'mcp_policy_id ' + ROTATION.indexOf(st.name));
 
     gauges.keys(1024).forEach(function (k) {
         var v = gauges.get(k);
@@ -429,11 +520,15 @@ function control(r) {
                 }) + '\n');
                 return;
             }
+            var was = p.get('policy');
             p.set('policy', q.policy);
             p.set('since', String(Date.now()));
             var ri = ROTATION.indexOf(q.policy);
             if (ri >= 0) {
                 p.set('idx', String(ri));
+            }
+            if (was !== q.policy) {
+                post_annotation(was, q.policy);
             }
         }
         if (q.auto) {
@@ -451,6 +546,7 @@ function control(r) {
     var resp = {
         policy: st.name,
         description: st.cfg.desc,
+        what_you_are_seeing: st.cfg.explain,
         auto_rotate: st.auto,
         rotate_interval_seconds: st.interval,
         seconds_in_policy: Math.round((Date.now() - st.since) / 1000),

@@ -283,6 +283,12 @@ func runWorker(ctx context.Context, cfg *Config, tools *ToolDistribution, stats 
 
 			if err != nil {
 				stats.Errors.Add(1)
+				// Back off on failures (incl. 429s from rate
+				// limiting) instead of spinning at reject speed
+				select {
+				case <-ctx.Done():
+				case <-time.After(300 * time.Millisecond):
+				}
 				continue
 			}
 

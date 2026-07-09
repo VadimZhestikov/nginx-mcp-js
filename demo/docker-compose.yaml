@@ -81,7 +81,7 @@ services:
     networks:
       - mcp-network
 
-  # MCP Server: flaky (~2% protocol errors, ~10% tool errors)
+  # MCP Server: flaky (~2% protocol errors, ~25% tool errors)
   mcp-flaky:
     build:
       context: ./mcp
@@ -95,7 +95,7 @@ services:
       - "--error-rate"
       - "0.02"
       - "--tool-error-rate"
-      - "0.10"
+      - "0.25"
       - "--long-rate"
       - "0"
     networks:

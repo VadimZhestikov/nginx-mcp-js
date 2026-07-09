@@ -12,6 +12,24 @@
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "purple",
+        "name": "Policy changes",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [
+            "mcp-policy"
+          ],
+          "type": "tags"
+        }
       }
     ]
   },
@@ -902,6 +920,26 @@
       },
       "pluginVersion": "12.3.1",
       "type": "timeseries"
+    },
+    {
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 10,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "## Demonstrator notes \u2014 how traffic-control policies show up in these observability panels\n\nAll data here comes from **passive observation**: `mcp.js` parses MCP JSON-RPC/SSE traffic inside NGINX and nginx-otel exports span attributes \u2014 no client or server changes. Purple vertical markers are policy transitions from the traffic-control plane (hover for what changed; companion dashboard: **MCP traffic control**).\n\n- **open** \u2014 natural shape of the traffic: red+purple on mcp-stable, green on mcp-flaky (its tool error rate ~25% shows in *Error rate per server/client*), blue on mcp-sluggish (`query_db` and `resize_image` dominate *P99 per tool*).\n- **protect-upstreams** \u2014 *RPS per server* for mcp-flaky drops as its dynamic limit clamps; green's RPS falls with it (429s are rejected before reaching the upstream, so error-rate panels here stay unchanged \u2014 rejects are visible on the traffic-control dashboard).\n- **fair-clients** \u2014 *RPS per client* flattens for client-purple at the fair-share cap; other clients unchanged.\n- **full-control** \u2014 the flagship view: in *RPS per server* and *Error rate per client*, client-green's traffic **migrates from mcp-flaky to mcp-stable** as new sessions are rerouted, and green's observed error rate collapses \u2014 same clients, same servers, healthier system.",
+        "mode": "markdown"
+      },
+      "title": "Demonstrator notes",
+      "type": "text"
     }
   ],
   "preload": false,
@@ -918,6 +956,6 @@
   "timezone": "browser",
   "title": "MCP overview",
   "uid": "adlwzrr",
-  "version": 14,
+  "version": 15,
   "weekStart": ""
 }
