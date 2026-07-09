@@ -118,6 +118,10 @@ docker compose down
 
 ## Traffic control demo
 
+> Presenting this demo to an audience? See the
+> [presenter one-pager](PRESENTER.md) for a concise explanation of the
+> control components, the example policies, and the talking points.
+
 Beyond passive observability, the demo includes a dynamic traffic-control
 plane (`nginx/mcp_control.js`) that recomputes rate limits every second from
 the traffic it observes and enforces them in NGINX — no changes to MCP
