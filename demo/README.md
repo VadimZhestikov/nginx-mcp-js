@@ -200,6 +200,39 @@ overview** dashboard shows the effect on real traffic (e.g.
 client-green shifting from mcp-flaky to mcp-stable under
 `full-control`).
 
+### Performance overhead of the control plane
+
+The demo includes a plain-proxy location (`/raw-stable`, no njs) so the
+control plane's cost can be measured directly against an identical proxied
+path. With [wrk](https://github.com/wg/wrk) posting `tools/call` requests
+from a container on the demo network:
+
+```bash
+docker run --rm --network demo_mcp-network \
+    -v $(pwd)/bench/bench.lua:/bench.lua:ro williamyeh/wrk \
+    -t4 -c100 -d10s --latency -s /bench.lua http://nginx:9000/raw-stable
+# ...then the same against http://nginx:9000/mcp-stable
+```
+
+Representative numbers (WSL2, 8 shared cores, servers + load generator on
+the same host, OTel tracing at 100% sampling on both paths):
+
+| Path | Workers | Req/s | p50 | p99 |
+|------|---------|-------|-----|-----|
+| plain proxy (`/raw-stable`) | 1 | ~4,200 | 13ms | 22ms |
+| full control (`/mcp-stable`) | 1 | ~2,200 | 23ms | 43ms |
+| plain proxy | auto (8) | ~14,700 | 7ms | 30ms |
+| full control | auto (8) | ~7,500 | 14ms | 39ms |
+
+The control plane (body parse, shared-dict counters, limit checks, routing,
+response parsing, per-request njs VM) costs roughly **0.2ms of worker CPU
+per request** — it halves nginx's raw proxy ceiling but still sustains
+thousands of controlled tool calls per second per core, far above what
+typical MCP/LLM traffic generates. Two configuration details matter far
+more than the JavaScript: upstream `keepalive` pools (without them nginx
+opens a TCP connection per request and exhausts ephemeral ports — an 11x
+throughput cliff) and `worker_processes auto`.
+
 ## File layout
 
 ```
