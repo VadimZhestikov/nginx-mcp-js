@@ -44,6 +44,43 @@ per-tool limits, tenant quotas, cost budgets, schedule-based rules, canary
 routing. If you can express it in JavaScript, NGINX can enforce it on MCP
 traffic in real time.
 
+## Performance (measured on this demo)
+
+The control plane costs roughly **0.2ms of worker CPU per request**: the
+proxy sustains thousands of controlled tool calls per second **per core**
+(~7,500 req/s on 8 shared cores vs. ~14,700 req/s for a plain proxy path —
+see the [README performance section](README.md#performance-overhead-of-the-control-plane)
+for the method and numbers). Real MCP traffic is LLM-paced — tens to
+hundreds of tool calls per second — so the ceiling is orders of magnitude
+away. Config details matter more than the JavaScript: upstream `keepalive`
+pools alone were an 11x throughput difference.
+
+## What NGINX Plus would add (OSS vs. commercial)
+
+NGINX Plus shares the same core engine — plain proxying speed is identical.
+The gains from a Plus rewrite are architectural:
+
+| Demo component (njs today) | NGINX Plus native equivalent |
+|---|---|
+| Rate check in the njs gate | `limit_req` with dynamic `rate=$variable` from the key-value store (C-speed, REST-updatable) |
+| Session→upstream affinity (shared dict) | `sticky learn` keyed on `Mcp-Session-Id` |
+| Error-based rerouting | Active health checks + dynamic upstream API |
+| Policy control API (`:9100/policy`) | The supported NGINX Plus REST API + live dashboard |
+| **MCP parsing** (tool names, error status from JSON-RPC/SSE) | **No native equivalent — njs remains the MCP-awareness layer on Plus too** |
+
+Expected effect of moving enforcement into C: **~1.3–1.5x** controlled-path
+throughput keeping full per-tool observability (up to ~2x if limiting is
+header-only), and rejections become nearly free — `limit_req` fires before
+the request body is even read. The strongest Plus argument at realistic MCP
+rates isn't throughput though: **`zone_sync` replicates limits and session
+affinity across a cluster**, while the OSS shared dicts are per-instance
+and reset on restart.
+
+**Pitch line:** OSS + njs proves the concept at thousands of controlled
+calls/sec per core; Plus turns it into a productizable architecture —
+native enforcement, a supported control-plane API, and cluster-wide state —
+while njs remains the MCP-awareness layer in both.
+
 ## Where to look during the demo
 
 - **MCP traffic control** dashboard (Grafana, http://localhost:3000,
