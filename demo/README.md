@@ -120,7 +120,8 @@ docker compose down
 
 > Presenting this demo to an audience? See the
 > [presenter one-pager](PRESENTER.md) for a concise explanation of the
-> control components, the example policies, and the talking points.
+> control components, the example policies, the talking points, measured
+> performance, and an OSS vs. NGINX Plus comparison.
 
 Beyond passive observability, the demo includes a dynamic traffic-control
 plane (`nginx/mcp_control.js`) that recomputes rate limits every second from
@@ -238,6 +239,9 @@ throughput cliff) and `worker_processes auto`.
 ```
 demo/
 ├── docker-compose.yaml                 # Multi-container orchestration
+├── PRESENTER.md                        # One-pager for live demonstrations
+├── bench/
+│   └── bench.lua                       # wrk script for overhead measurement
 ├── nginx/
 │   ├── mcp.conf                        # NGINX config (proxy + otel + njs)
 │   └── mcp_control.js                  # Dynamic rate limiting + routing (njs)
