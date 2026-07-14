@@ -3,8 +3,11 @@
 // This source code is licensed under the Apache License, Version 2.0 license found in the
 // LICENSE file in the root directory of this source tree.
 
-var _mcp_messages = [];
-var _mcp_buffer = "";
+// Per-request state lives in nginx variables ($mcp_buf, $mcp_first_msg —
+// declared with js_var in nginx.conf) rather than module globals: the njs
+// engine gives every request a fresh VM, but the QuickJS engine
+// (js_engine qjs) runs all requests in one persistent context, where
+// module globals would leak across requests and grow without bound.
 
 function mcp_header_filter(r) {
     delete r.headersOut['Content-Length'];
@@ -59,19 +62,22 @@ function parse_sse_first_json(buffer) {
 }
 
 function mcp_response_filter(r, data, flags) {
-    _mcp_buffer += data;
     r.sendBuffer(data, flags);
 
-    if (_mcp_messages.length > 0) {
+    if (r.variables.mcp_first_msg) {
         return;
     }
 
-    var json_obj = parse_sse_first_json(_mcp_buffer);
+    var buffer = r.variables.mcp_buf + data;
+    r.variables.mcp_buf = buffer;
+
+    var json_obj = parse_sse_first_json(buffer);
     if (!json_obj) {
         return;
     }
 
-    _mcp_messages.push(json_obj);
+    r.variables.mcp_first_msg = JSON.stringify(json_obj);
+    r.variables.mcp_buf = '';
 
     if (json_obj.result && json_obj.result.serverInfo) {
         var sid = r.headersOut['Mcp-Session-Id'];
@@ -82,6 +88,19 @@ function mcp_response_filter(r, data, flags) {
     }
 
     r.done();
+}
+
+function first_message(r) {
+    var s = r.variables.mcp_first_msg;
+    if (!s) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(s);
+    } catch (e) {
+        return null;
+    }
 }
 
 function getPath(r, json_obj, path) {
@@ -107,17 +126,16 @@ function getPath(r, json_obj, path) {
 }
 
 function has_error(r) {
-    if (_mcp_messages.length === 0) {
+    var msg = first_message(r);
+    if (!msg) {
         return false;
     }
 
-    var first_message = _mcp_messages[0];
-
-    if (getPath(r, first_message, "error")) {
+    if (getPath(r, msg, "error")) {
         return true;
     }
 
-    if (getPath(r, first_message, "result.isError")) {
+    if (getPath(r, msg, "result.isError")) {
         return true;
     }
 
@@ -160,8 +178,8 @@ function mcp_tool_status(r) {
     return 'ok';
 }
 
-function mcp_message_parsed() {
-    return _mcp_messages.length > 0;
+function mcp_message_parsed(r) {
+    return !!r.variables.mcp_first_msg;
 }
 
 export default {

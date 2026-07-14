@@ -29,7 +29,7 @@ Traffic path: MCP client → NGINX (`mcp.js` body/header filters + nginx-otel) �
 
 **njs, not Node.js.** The file runs inside NGINX's njs engine: no npm, no Node APIs, limited ES6. It uses the njs-specific request object (`r.requestText`, `r.headersIn/Out`, `r.sendBuffer`, `r.done`) and `ngx.shared` dict zones. Keep the existing ES5-style code (`var`, manual property chains) — do not modernize to syntax njs may not support.
 
-**Per-request VM.** The module-level globals `_mcp_buffer` / `_mcp_messages` look like shared mutable state but are safe: njs instantiates a fresh VM per request, so they are effectively per-request buffers.
+**Per-request state lives in nginx variables** (`js_var $mcp_buf`, `$mcp_first_msg`, `$mcp_acct` — declared in nginx.conf), never in module globals. The njs engine instantiates a fresh VM per request (globals would be safe there), but the QuickJS engine (`js_engine qjs`) runs all requests in one persistent context per worker, where module globals leak across requests: an earlier version kept the SSE buffer in a global and under qjs it grew without bound (O(n) append per chunk → monotonic throughput decline, reset only by reload) and pinned the first response's error status forever. `js_body_filter` also needs `buffer_type=string` for qjs (chunks arrive as Buffers by default there).
 
 **How the pieces fit** (wired up in nginx.conf, see `demo/nginx/mcp.conf` or the root README):
 

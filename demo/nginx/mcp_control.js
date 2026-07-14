@@ -222,13 +222,14 @@ function header_filter(r) {
 
 // Wraps mcp.js's body filter and feeds per-upstream response/error counters
 // once the first JSON-RPC message of the response has been parsed.
-var _accounted = false;
+// Per-request state is a js_var ($mcp_acct), not a module global, so the
+// code behaves identically on the njs and QuickJS (js_engine qjs) engines.
 
 function response_filter(r, data, flags) {
     mcp.mcp_response_filter(r, data, flags);
 
-    if (!_accounted && mcp.mcp_message_parsed()) {
-        _accounted = true;
+    if (!r.variables.mcp_acct && mcp.mcp_message_parsed(r)) {
+        r.variables.mcp_acct = '1';
         var up = r.variables.mcp_upstream;
         if (up) {
             ngx.shared.mcp_stats.incr('q:u:' + up, 1);
